@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Contract</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Reference</p>
+  <h1>The contract (Part A)</h1>
+  <p class="subtitle"><code>ExtractedValue(**data)</code> or <code>Relationship(**data)</code> returns an object or raises <code>ValidationError</code>. Nothing in between. From <a href="../lessons/0003-the-contract-four-gates.html">lesson 3</a>.</p>
+</header>
+
+<section>
+  <h2>The four gates, in order</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Gate</th><th>Mechanism</th><th>Error <code>type</code></th><th>Example</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>1. Unknown fields</td><td><code>ConfigDict(extra="forbid")</code></td><td><code>extra_forbidden</code></td><td><code>confidence=0.9</code></td><td>given</td></tr>
+      <tr><td>2. Each field</td><td>type hints, no default, <code>Field(min_length=1)</code></td><td><code>enum</code>, <code>missing</code>, <code>string_too_short</code>, <code>bool_parsing</code></td><td><code>predicate="prevents"</code>, <code>value</code> left out, <code>subject_text=""</code></td><td>given</td></tr>
+      <tr><td>3. Rule linking fields</td><td><code>@model_validator(mode="after")</code> raising <code>ValueError</code></td><td><code>value_error</code></td><td><code>causes</code> + <code>negated=True</code>; <code>"Germany"</code> + <code>not_found_in_source</code></td><td>built</td></tr>
+      <tr><td>4. Built</td><td colspan="4">the object exists; later code may trust it</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Gates 1–2 report all their errors together. <strong>Gate 3 runs only if 1–2 found nothing.</strong></p>
+</section>
+
+<section>
+  <h2>The two validators</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Validator</th><th>Rule (given as TODO)</th><th>Pinned by</th></tr></thead>
+    <tbody>
+      <tr><td><code>ExtractedValue._value_matches_status</code></td><td><code>present</code> ⇒ value not <code>None</code>; any other status ⇒ value is <code>None</code></td><td><code>test_present_needs_value</code>, <code>test_missing_status_forbids_value</code>, <code>test_every_non_present_status_forbids_value</code>, <code>test_valid_absence</code></td></tr>
+      <tr><td><code>Relationship._negation</code></td><td><code>negated=True</code> ⇒ predicate not in <code>ASSERTED</code></td><td><code>test_negated_asserted_rejected</code>, <code>test_negated_unrelated_or_uncertain_ok</code>, <code>test_two_consistent_mistakes_pass_the_contract</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Why it is written that way</h2>
+  <ul>
+    <li><strong><code>mode="after"</code></strong>: <code>self</code> has typed, checked fields (<code>"present"</code> → <code>ValueStatus.PRESENT</code>, <code>"yes"</code> → <code>True</code>). <code>"before"</code> would see the raw dict.</li>
+    <li><strong><code>ValueError</code>, not <code>assert</code></strong>: <code>python -O</code> strips asserts. Must <code>return self</code>.</li>
+    <li><strong>Unknown is not null</strong>: <code>value</code> has no default; emptiness needs an explicit <code>None</code> plus a status saying why.</li>
+  </ul>
+  <h2>Limits</h2>
+  <ul>
+    <li><code>value=""</code> with <code>present</code> is accepted (the check is <code>is None</code>). Untested.</li>
+    <li>Construction only: not <code>frozen</code>, no <code>validate_assignment</code>, so <code>rel.negated = True</code> later goes unnoticed.</li>
+  </ul>
+  <p>Sources: pydantic <a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#model-validators">model validators</a>, <a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#raising-validation-errors">raising validation errors</a>, <a href="https://pydantic.dev/docs/validation/latest/api/pydantic/config/#pydantic.config.ConfigDict.extra"><code>ConfigDict.extra</code></a>.</p>
+</section>
+
+<nav class="nav">
+  <a href="../lessons/0003-the-contract-four-gates.html">← Lesson 3</a>
+  <a href="given-vs-built.html">Given vs built →</a>
+</nav>
+
+</article>
+</body>
+</html>

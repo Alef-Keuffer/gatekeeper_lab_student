@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 4 · Two passes</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Lesson 4</p>
+  <h1>Two passes: your rules only run on clean fields</h1>
+  <p class="subtitle">A repair of <a href="0003-the-contract-four-gates.html">lesson 3</a>. One idea, six questions, five minutes. You leave able to predict exactly which errors a <code>ValidationError</code> lists.</p>
+</header>
+
+<section>
+  <h2>What went wrong last time</h2>
+  <p>Questions 4 and 5 tested the same thing, and lesson 3 buried it under too much else. That’s on the lesson, not on you. Also, two of its answer labels overlapped: <code>confidence</code> <em>is</em> “a field”, and it <em>does</em> “fail”. This lesson names the error <code>type</code> instead.</p>
+</section>
+
+<section>
+  <h2>The one idea</h2>
+  <p>Forget the four gates. Pydantic makes <strong>two passes</strong> over the input:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Pass</th><th>Asks, for every key</th><th>Error <code>type</code></th></tr></thead>
+    <tbody>
+      <tr><td><strong>1. Each key alone</strong></td><td>Does the class declare this key? Is a declared key present? Is its value the right type and size?</td><td><code>extra_forbidden</code>, <code>missing</code>, <code>enum</code>, <code>string_too_short</code></td></tr>
+      <tr><td><strong>2. Your rules</strong></td><td>Do the fields agree with each other? (your <code>@model_validator(mode="after")</code>)</td><td><code>value_error</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Two facts, and they are the whole lesson:</p>
+  <ol>
+    <li><strong>Pass 1 never stops early.</strong> It checks every key and lists <em>all</em> its errors together.</li>
+    <li><strong>Pass 2 runs only if pass 1 found nothing.</strong> If any key failed, your rule never runs, even if it would also have failed.</li>
+  </ol>
+
+  <p>Why? Your rule reads <code>self.status</code> and <code>self.value</code> as real, typed values. If <code>status</code> was <code>"maybe"</code>, there is no valid <code>self.status</code> to compare, so pydantic doesn’t call the rule at all.<span class="side">The docs: after-validators “run after the whole model has been validated” (<a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#model-validators">Validators › Model validators</a>). Lesson 3’s gates 1 and 2 are pass 1; gate 3 is pass 2.</span></p>
+</section>
+
+<section>
+  <h2>See it: the field-name line</h2>
+  <p>Real output from your code. Look at the line above each message.</p>
+
+<pre><code># ExtractedValue(value="Germany", status="maybe", confidence=0.9)
+2 validation errors for ExtractedValue
+<strong>status</strong>
+  Input should be 'present', 'not_found_in_source', … [type=enum, …]
+<strong>confidence</strong>
+  Extra inputs are not permitted [type=extra_forbidden, …]
+
+# ExtractedValue(value=None, status="present")
+1 validation error for ExtractedValue
+  Value error, status present requires a value [type=value_error, …]</code></pre>
+  <span class="src">pydantic 2.14, your gatekeeper.py at fadcd29</span>
+
+  <p>A pass-1 error names the key it’s about. A pass-2 error names no key: your rule is about the whole object. The first example shows fact 1 (two errors at once). Add <code>confidence=0.9</code> to the second example and you get <em>only</em> <code>extra_forbidden</code>: fact 2.</p>
+
+  <p>Try it yourself from the repo root, in the venv where the tests pass:</p>
+  <pre><code>python -c "from gatekeeper import ExtractedValue as E; E(value=None, status='present', confidence=0.9)"</code></pre>
+</section>
+
+<section>
+  <h2>Practice: what does the error list?</h2>
+  <p>For each call, pick every error <code>type</code> the <code>ValidationError</code> lists. <code>(none)</code> means the object gets built. All confirmed by running your code.</p>
+  <p class="quiz-score"></p>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">1. <code>ExtractedValue(value="Germany", status="maybe", confidence=0.9)</code></p>
+    <ol>
+      <li><code>enum</code></li>
+      <li><code>extra_forbidden</code></li>
+      <li><code>enum</code> + <code>extra_forbidden</code></li>
+      <li><code>enum</code> + <code>value_error</code></li>
+    </ol>
+    <p class="explain">Both are pass-1 errors, and pass 1 lists all of them. Fact 1.</p>
+  </div>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">2. <code>ExtractedValue(value=None, status="present")</code></p>
+    <ol>
+      <li><code>value_error</code></li>
+      <li><code>missing</code></li>
+      <li><code>extra_forbidden</code></li>
+      <li><code>(none)</code></li>
+    </ol>
+    <p class="explain">Every key is declared and valid alone (<code>None</code> is allowed by <code>str | None</code>), so pass 2 runs, and your first <code>if</code> raises.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">3. <code>ExtractedValue(value=None, status="present", confidence=0.9)</code></p>
+    <ol>
+      <li><code>value_error</code></li>
+      <li><code>extra_forbidden</code> + <code>value_error</code></li>
+      <li><code>extra_forbidden</code></li>
+      <li><code>(none)</code></li>
+    </ol>
+    <p class="explain">This is lesson 3’s question 5. <code>confidence</code> isn’t declared, so pass 1 fails, and your rule never runs. Fact 2.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">4. <code>ExtractedValue(value=None, status="withheld", reason="privacy")</code></p>
+    <ol>
+      <li><code>missing</code></li>
+      <li><code>value_error</code></li>
+      <li><code>extra_forbidden</code></li>
+      <li><code>(none)</code></li>
+    </ol>
+    <p class="explain"><code>reason</code> is declared (optional), and a non-present status with no value is exactly what your rule wants. Built.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">5. <code>ExtractedValue(status="present")</code></p>
+    <ol>
+      <li><code>value_error</code></li>
+      <li><code>missing</code></li>
+      <li><code>missing</code> + <code>value_error</code></li>
+      <li><code>(none)</code></li>
+    </ol>
+    <p class="explain"><code>value</code> has no default, so leaving it out is a pass-1 error. Pass 2 never runs. Leaving a key out is not the same as writing <code>value=None</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">6. A <code>Relationship</code> with <code>predicate=causes</code>, <code>negated=True</code> and <code>subject_text=""</code>.</p>
+    <ol>
+      <li><code>value_error</code></li>
+      <li><code>string_too_short</code> + <code>value_error</code></li>
+      <li><code>(none)</code></li>
+      <li><code>string_too_short</code></li>
+    </ol>
+    <p class="explain">Lesson 3’s question 4. Same rule, other class: the empty string fails <code>min_length=1</code> in pass 1, so <code>_negation</code> never gets a say.</p>
+  </div>
+
+  <h3>Say it out loud</h3>
+  <p>One point only. Answer, without looking: “If a record has a bad field <em>and</em> breaks your rule, what does pydantic report, and why?”</p>
+  <details>
+    <summary>Check</summary>
+    <ol>
+      <li>Only the field error. Pydantic checks every key first and reports all those errors together; the model validators run only if that pass is clean, because they need typed, valid fields to compare.</li>
+    </ol>
+  </details>
+
+  <div class="callout">
+    <p><strong>Report back.</strong> Your score out of 6, and whether your spoken answer matched.</p>
+    <p><strong>Ask me anything that’s still unclear.</strong> If an answer surprised you, tell me which one and what you expected.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Read next</h2>
+  <p><strong>Primary source: pydantic’s <a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#model-validators">Validators › Model validators</a></strong>, two minutes. The rest of lesson 3 (after vs before, <code>ValueError</code> vs <code>assert</code>, the two limits) comes back as warm-ups in later lessons; the <a href="../reference/contract.html">contract sheet</a> has it on one page.</p>
+</section>
+
+<nav class="nav">
+  <a href="0003-the-contract-four-gates.html">← Lesson 3: The contract</a>
+  <a href="../reference/contract.html">Reference: The contract →</a>
+</nav>
+
+</article>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

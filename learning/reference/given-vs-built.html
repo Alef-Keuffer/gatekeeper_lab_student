@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Given vs Built</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Reference</p>
+  <h1>Given vs built</h1>
+  <p class="subtitle">What the professor handed out (commit <code>453a596</code>) and what the implementation added (commit <code>fadcd29</code>). Rows marked ★ are choices beyond the spec, which is where a defense gets probed.</p>
+</header>
+
+<section>
+  <h2>Given, untouched</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>File</th><th>What it holds</th></tr></thead>
+    <tbody>
+      <tr><td><code>README.md</code></td><td>Scenario, parts A–E, the four design rules, grading</td></tr>
+      <tr><td><code>models.py</code></td><td>Every type: <code>Predicate</code>, <code>ASSERTED</code>, <code>ValueStatus</code>, <code>Uncertainty</code>, <code>EvidenceSpan</code> (with its offset check), <code>CheckStatus</code>, <code>Finding</code>, <code>Report</code> + <code>has()</code>, <code>ResolutionResult</code> (with its consistency check), <code>Consequence</code>, <code>Assurance</code>, <code>Disposition</code>, <code>Decision</code></td></tr>
+      <tr><td><code>tests/test_gatekeeper.py</code></td><td>33 public tests</td></tr>
+      <tr><td><code>gatekeeper.py</code> starter</td><td>Imports; all fields of <code>ExtractedValue</code> and <code>Relationship</code> with types and <code>Field</code> limits; every function signature; a docstring per TODO stating the rule</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Built, function by function</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Piece</th><th>Spec said</th><th>Implementation did</th></tr></thead>
+    <tbody>
+      <tr><td><code>ExtractedValue._value_matches_status</code></td><td>A1: PRESENT needs a value; other statuses forbid one</td><td>An after-validator raising <code>ValueError</code>, as specified</td></tr>
+      <tr><td><code>Relationship._negation</code></td><td>A2: reject <code>negated=True</code> with a predicate in <code>ASSERTED</code></td><td>As specified</td></tr>
+      <tr><td><code>sha256_text</code></td><td>B1: hex SHA-256 of UTF-8</td><td>One line, <code>hashlib</code></td></tr>
+      <tr><td>★ <code>verify_span</code></td><td>B2: checksum matches <em>and</em> the slice equals the quote</td><td>Adds a third condition, <code>end_offset &lt;= len(text)</code>, because slices clamp silently</td></tr>
+      <tr><td><code>span_finding</code></td><td>B3: PASSED / FAILED <code>INVALID_EVIDENCE_SPAN</code>, name <code>source-span</code></td><td>As specified, plus a <code>detail</code> message</td></tr>
+      <tr><td>★ <code>negation_cue_finding</code></td><td>C1: the cue list, whole words, case-insensitive</td><td>One regex; longest cues first so the reported cue is the most specific; <code>\s+</code> between words; <code>\b</code> at both ends</td></tr>
+      <tr><td><code>uncertainty_finding</code></td><td>C2: WARNING when HIGH or UNKNOWN; never modify <code>rel</code></td><td>As specified</td></tr>
+      <tr><td>★ <code>resolve_entity</code></td><td>C3: exact match after <code>strip()</code> + <code>casefold()</code></td><td>Normalises both the input and each registry label; also fills <code>candidates</code> on RESOLVED</td></tr>
+      <tr><td><code>required_assurance</code></td><td>D1: the four-step mapping</td><td>A dict lookup</td></tr>
+      <tr><td>★ <code>decide</code></td><td>D2: five ordered rules; report codes in <code>reason_codes</code>; rules 2 and 4 <em>may</em> append their own code</td><td>The rules as given; appends the optional codes; <strong>adds <code>ASSOCIATION_AS_CAUSATION</code> to rule 3</strong> (via <code>_SEMANTIC_MISMATCH_CODES</code>)</td></tr>
+      <tr><td>★ <code>causal_claim_finding</code></td><td>Part E: “one new check”, unspecified</td><td>Entirely new: WARNING <code>ASSOCIATION_AS_CAUSATION</code> when the predicate is <code>causes</code> and the quote uses association words</td></tr>
+      <tr><td>★ <code>tests/test_extra.py</code></td><td>Part E: ≥ 3 tests, including a false positive</td><td>6 tests</td></tr>
+      <tr><td>★ <code>REFLECTION.md</code></td><td>Part E: 3 adversarial candidates, the new check, 2 short essays, AI-use note</td><td>All written by the implementation, then checked with probe scripts</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>See it yourself: <code>git show 453a596:gatekeeper.py</code> (the starter) and <code>git diff 453a596 fadcd29</code> (everything that was added).</p>
+</section>
+
+<nav class="nav">
+  <a href="../lessons/0002-foundations-the-job-three-kinds-of-wrong.html">← Lesson 2: Foundations</a>
+  <a href="gatekeeper-map.html">Reference: Gatekeeper map →</a>
+</nav>
+
+</article>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2 · Foundations</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Lesson 2</p>
+  <h1>Foundations: the job, three kinds of wrong, and who wrote what</h1>
+  <p class="subtitle">Lesson 1 used words before it explained them. This lesson lays the ground floor. About ten minutes, mostly practice.</p>
+</header>
+
+<section>
+  <h2>The job</h2>
+  <p>An LLM reads scientific papers and turns sentences into <strong>records</strong> such as <em>Gene X · causes · Disease Y</em>. The records go into a database that people will rely on. The LLM can be wrong while its output looks perfect.<span class="side">This is OWASP’s <a href="https://genai.owasp.org/llmrisk/llm092025-misinformation/">LLM09 Misinformation</a>: “false or misleading information that appears credible.”</span></p>
+  <p>The <strong>gatekeeper</strong> is the code between the LLM and the database. For each record it decides how far the database should trust it. It never <em>fixes</em> a record; it gives the record one label, its <strong>disposition</strong>:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Disposition</th><th>Plain meaning</th></tr></thead>
+    <tbody>
+      <tr><td><span class="d d-q">QUARANTINE</span></td><td>set aside and unusable: its evidence quote isn’t really in the paper</td></tr>
+      <tr><td><span class="d d-hr">HUMAN_REVIEW</span></td><td>a person must look at it before anyone uses it</td></tr>
+      <tr><td><span class="d d-p">PROVISIONAL</span></td><td>stored and usable, but flagged as not fully trusted</td></tr>
+      <tr><td><span class="d d-a">AUTHORITATIVE</span></td><td>stored as trusted fact</td></tr>
+      <tr><td><code>REJECT</code></td><td>refused outright; it exists in <code>models.py</code>, but your <code>decide()</code> never returns it</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Three kinds of wrong</h2>
+  <p>To sort any bad record, ask one question: <em>what do I have to look at to see the mistake?</em></p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Kind</th><th>You see it by looking at</th><th>Example</th><th>Caught by</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Malformed</strong></td><td>one field alone</td><td><code>predicate="prevents"</code> (not in the vocabulary), <code>negated="maybe"</code>, an empty <code>subject_text</code>, an unknown extra field</td><td>field types and <code>Field(…)</code> limits → <code>ValidationError</code></td></tr>
+      <tr><td><strong>Inconsistent</strong></td><td>the whole record, without the paper: two fields break a rule that links them</td><td><code>causes</code> with <code>negated=True</code>; <code>value="Germany"</code> with <code>status=NOT_FOUND_IN_SOURCE</code></td><td>the model validators → <code>ValidationError</code></td></tr>
+      <tr><td><strong>Consistent-but-false</strong></td><td>the record <em>and</em> the paper</td><td>Gene X: <code>causes</code> with <code>negated=False</code></td><td>the checks → findings → <code>decide()</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The first two kinds never become a record at all: building the object raises <code>ValidationError</code>. That “refuse to build” step is the <strong>contract</strong>. The third kind passes the contract. Only a <strong>check</strong> that compares the record with the paper can see it.<span class="side">Every row was confirmed by running your code. One surprise: pydantic accepts <code>negated="yes"</code> as <code>True</code>, so <code>"yes"</code> is <em>not</em> malformed. <code>"maybe"</code> is.</span></p>
+
+  <h3>The Gene X sentence, three ways</h3>
+  <p>The sentence: “Gene X did <strong>not</strong> significantly increase the risk of Disease Y.”</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th><code>predicate</code></th><th><code>negated</code></th><th>What the record claims</th><th>Contract</th></tr></thead>
+    <tbody>
+      <tr><td><code>unrelated_to</code> or <code>uncertain</code></td><td><code>True</code></td><td>a denied or unclear link, which is faithful to the paper</td><td>accepts</td></tr>
+      <tr><td><code>causes</code></td><td><code>True</code></td><td>breaks the lab’s rule: a negated record may not carry an asserting predicate (see below)</td><td><strong>rejects</strong> (inconsistent)</td></tr>
+      <tr><td><code>causes</code></td><td><code>False</code></td><td>“Gene X causes Disease Y”: coherent, and false</td><td>accepts (consistent-but-false)</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>The last row is what the model actually returned. It has <strong>two mistakes</strong>: <code>causes</code> (the paper denies an effect) and <code>negated=False</code> (the sentence says “did not”). With only the first mistake you get the middle row, which the contract rejects. Making <em>both</em> mistakes produces a record that breaks no rule, so it gets through. The professor’s test name says exactly this: <code>test_two_consistent_mistakes_pass_the_contract</code>.</p>
+
+  <h3>Wait: doesn’t <code>causes</code> + <code>negated=True</code> just mean “does not cause”?</h3>
+  <p>In plain English, yes. That is a fair objection, and it depends on what <code>negated</code> means, which the lab never defines in words. There are two possible readings:</p>
+  <ul>
+    <li><strong>A flag on the predicate</strong> (“NOT causes”). Then <code>causes</code> + <code>negated=True</code> reads “does not cause”, which is fine. But <code>unrelated_to</code> + <code>negated=True</code> reads “not unrelated”, a double negative.</li>
+    <li><strong>A flag on the sentence</strong> (“the source says this negatively”), with the predicate stating on its own what the record claims. Then <code>causes</code> + <code>negated=True</code> is a mismatch: the predicate claims causation from a sentence that denies it.</li>
+  </ul>
+  <p>The professor’s rule (reject <code>negated=True</code> with any predicate in <code>ASSERTED</code>) and test (<code>test_negated_unrelated_or_uncertain_ok</code> accepts <code>unrelated_to</code> + <code>negated=True</code>) only make sense under the second reading. That is my inference from the rule and the tests, not something the lab states, so ask the professor to confirm it. A designer has a good reason to choose it: <code>predicate</code> is the field everyone filters on. A query for <code>predicate = 'causes'</code> that forgets to check <code>negated</code> would return Gene X as a causal claim. With the rule, <code>causes</code> in the database always means a positive claim.<span class="side">A second reason: “did not significantly increase the risk” is not the same as “does not cause”. A non-significant result usually shows only an absence of evidence; see Altman &amp; Bland, “<a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC2550545">Absence of evidence is not evidence of absence</a>”, BMJ 1995. So even “does not cause” would overstate the paper, and <code>uncertain</code> is arguably closer.</span></p>
+  <p>That’s why this kind is called <strong>inconsistent</strong> rather than “contradictory”: the record breaks a rule the lab chose. It isn’t illogical in plain English.</p>
+</section>
+
+<section>
+  <h2>Two inputs that are not evidence</h2>
+  <p><strong>Consequence: how bad it would be if this record were wrong.</strong> The gatekeeper doesn’t work this out. It is a parameter, <code>decide(rel, report, consequence)</code>, and whoever calls <code>decide()</code> supplies it. Nothing in the lab computes it; the tests pass <code>Consequence.LOW</code> or <code>Consequence.HIGH</code> by hand. It describes <em>where the data will be used</em>, not the record.<span class="side">An illustration, not from the lab: a literature-browsing tool might be LOW, a database feeding clinical decisions CRITICAL. Ask the professor how Chapter 2 frames who sets it.</span></p>
+  <p><strong>Confidence: the model grading its own answer</strong> (the <code>uncertainty</code> field). In your code it has one effect. <code>uncertainty_finding</code> turns HIGH or UNKNOWN into a <code>HIGH_CANDIDATE_UNCERTAINTY</code> warning, which is copied into the decision’s <code>reason_codes</code> for a reviewer or an audit. No rule acts on it. The model can be confidently wrong (Gene X said <code>low</code>), and letting it move the disposition would let it grade its own homework. README design rule 3 forbids that, and <code>test_model_confidence_is_not_authority</code> enforces it.</p>
+</section>
+
+<section>
+  <h2>Who wrote what</h2>
+  <p>The professor’s starter file (<code>git show 453a596:gatekeeper.py</code>) already contained every class field, every function signature, and docstrings that spelled out each rule. That includes all five rules of <code>decide()</code>, the negation cue words and the consequence→assurance mapping. <code>models.py</code>, the public tests and the README were given too.</p>
+  <p>The implementation wrote the function bodies, plus a handful of choices <em>beyond</em> the spec, and all of Part E. Those choices are where a defense gets probed, because the professor already knows the design. Each one is listed on the <a href="../reference/given-vs-built.html">given vs built</a> sheet.</p>
+</section>
+
+<section>
+  <h2>Practice</h2>
+  <p>Questions 1–5: sort each record into one of the three kinds of wrong, or “faithful” if nothing is wrong. Answer from memory; your first click counts.</p>
+
+  <p class="quiz-score"></p>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">1. Any sentence. The model returns <code>predicate="prevents"</code>.</p>
+    <ol><li>Malformed</li><li>Inconsistent</li><li>Consistent-but-false</li><li>Faithful</li></ol>
+    <p class="explain">You can see it from that one field: <code>prevents</code> isn’t in the <code>Predicate</code> vocabulary. Pydantic refuses to build the record: <code>Input should be 'associated_with', 'causes', … [type=enum]</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">2. The Gene X sentence. The model returns <code>predicate=inhibits</code>, <code>negated=True</code>.</p>
+    <ol><li>Malformed</li><li>Inconsistent</li><li>Consistent-but-false</li><li>Faithful</li></ol>
+    <p class="explain">Each field is valid alone, but together they break the lab’s rule: a negated record may not carry a predicate from <code>ASSERTED</code>, and <code>inhibits</code> is one of them. You don’t need the paper to see it. Your <code>_negation</code> validator raises, so the record never exists.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">3. “Gene A variants were associated with a higher incidence of Disease B.” The model returns <code>predicate=causes</code>, <code>negated=False</code>.</p>
+    <ol><li>Malformed</li><li>Inconsistent</li><li>Consistent-but-false</li><li>Faithful</li></ol>
+    <p class="explain">The record is coherent, but the paper reports an <em>association</em>, not causation, and only the paper shows that. Your Part E check <code>causal_claim_finding</code> flags it as <code>ASSOCIATION_AS_CAUSATION</code>, and at LOW consequence <code>decide()</code> returns PROVISIONAL.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">4. <code>ExtractedValue(value="Germany", status=NOT_FOUND_IN_SOURCE)</code></p>
+    <ol><li>Malformed</li><li>Inconsistent</li><li>Consistent-but-false</li><li>Faithful</li></ol>
+    <p class="explain">The status says “not found in the source”, yet a value is filled in. The two fields contradict each other. Your <code>_value_matches_status</code> validator raises.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">5. Same Gene A sentence as question 3. The model returns <code>predicate=associated_with</code>, <code>negated=False</code>.</p>
+    <ol><li>Malformed</li><li>Inconsistent</li><li>Consistent-but-false</li><li>Faithful</li></ol>
+    <p class="explain">This is exactly what the paper says. No check fires, and <code>decide()</code> returns AUTHORITATIVE at LOW consequence (confirmed by running your code).</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">6. Where does the <code>consequence</code> value come from?</p>
+    <ol>
+      <li><code>decide()</code> computes it from findings.</li>
+      <li>The model reports it alongside.</li>
+      <li>The caller passes it in.</li>
+      <li><code>required_assurance()</code> derives it from assurance.</li>
+    </ol>
+    <p class="explain">It is a parameter of <code>decide()</code>. It describes where the data will be used, so the gatekeeper can’t work it out from the record. <code>required_assurance()</code> goes the other way: consequence → assurance.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">7. In your code, what does <code>uncertainty=high</code> actually do?</p>
+    <ol>
+      <li>It sends the record to review.</li>
+      <li>It adds a warning, nothing else.</li>
+      <li>It quarantines the record at once.</li>
+      <li>It lowers the required assurance level.</li>
+    </ol>
+    <p class="explain"><code>uncertainty_finding</code> returns a <code>HIGH_CANDIDATE_UNCERTAINTY</code> warning, which lands in <code>reason_codes</code>. No rule in <code>decide()</code> reacts to it, so the disposition is the same as with <code>low</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">8. Which of these did the implementation write, rather than receive from the professor?</p>
+    <ol>
+      <li>The <code>decide()</code> rule list</li>
+      <li>The <code>Finding</code> model type</li>
+      <li>The consequence-assurance mapping table</li>
+      <li>The causal-claim check function</li>
+    </ol>
+    <p class="explain">Part E asked for “one new check”, and the README didn’t say which. Choosing association-reported-as-causation, its cue words and its wiring into rule 3 were all implementation decisions. The rule list and the mapping were in the starter docstrings; <code>Finding</code> is in <code>models.py</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">9. <code>verify_span</code> also rejects an <code>end_offset</code> past the end of the text. Where did that rule come from?</p>
+    <ol>
+      <li>Added by the implementation itself.</li>
+      <li>The starter docstring required it.</li>
+      <li>A public test demanded it.</li>
+      <li>The <code>EvidenceSpan</code> model enforces it.</li>
+    </ol>
+    <p class="explain">The starter docstring listed only two conditions: the checksum matches, and the slice equals the quote. Python slices <a href="https://docs.python.org/3/library/stdtypes.html#common-sequence-operations">clamp silently</a>, so <code>"abc"[1:10] == "bc"</code> would pass. The implementation added the bound; <code>REFLECTION.md</code> records it under “Changed”. <code>EvidenceSpan</code> can’t check it because it never sees the text.</p>
+  </div>
+
+  <h3>Say it out loud</h3>
+  <p>Three sentences, without looking: what the gatekeeper is for, why Gene X gets past the contract, and who sets the consequence. Then check.</p>
+  <details>
+    <summary>Checklist: three points</summary>
+    <ol>
+      <li>It sits between the LLM and the database and gives every record a disposition: how far the record can be trusted. It labels records; it doesn’t fix them.</li>
+      <li>Gene X has two mistakes that agree (<code>causes</code> + <code>negated=False</code>), so the record breaks no rule. Only comparing it with the paper shows it’s false.</li>
+      <li>The caller sets the consequence, according to where the data will be used. The gatekeeper never computes it.</li>
+    </ol>
+  </details>
+
+  <div class="callout">
+    <p><strong>Report back.</strong> Send me your score and how many of the three points you hit. Then, tomorrow, retake <a href="0001-the-map-gene-x-through-the-gatekeeper.html">lesson 1’s quiz</a>; a gap of a day makes it stick better.</p>
+    <p><strong>Ask me anything that’s still unclear</strong>, like you just did. Those questions are the most useful signal I get.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Read next</h2>
+  <p><strong>Primary source: the professor’s own starter file.</strong> In the repo, run <code>git show 453a596:gatekeeper.py</code> and read the docstrings. They are the spec your code had to meet, in the professor’s words. Then compare one function with the <a href="../reference/given-vs-built.html">given vs built</a> sheet.</p>
+</section>
+
+<nav class="nav">
+  <a href="0001-the-map-gene-x-through-the-gatekeeper.html">← Lesson 1: The map</a>
+  <a href="../reference/given-vs-built.html">Reference: Given vs built</a>
+  <a href="0003-the-contract-four-gates.html">Lesson 3: The contract →</a>
+</nav>
+
+</article>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

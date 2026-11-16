@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 3 · The contract</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Lesson 3</p>
+  <h1>The contract: four gates before a record exists</h1>
+  <p class="subtitle">Part A in pydantic terms. You leave able to look at any input and say which gate stops it, and why your two validators are written the way they are. About ten minutes.</p>
+</header>
+
+<section>
+  <h2>Warm-up: two from last time</h2>
+  <p>From memory, no scrolling back. These are the two spots that were soft in <a href="0002-foundations-the-job-three-kinds-of-wrong.html">lesson 2</a>.</p>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">W1. What is the gatekeeper’s job?</p>
+    <ol>
+      <li>Fix wrong records before they reach storage.</li>
+      <li>Label each record with how much trust.</li>
+      <li>Score the model’s confidence in each record.</li>
+      <li>Compute the consequence of using each record.</li>
+    </ol>
+    <p class="explain">It sits between the LLM and the database and gives every record a <strong>disposition</strong>. It never fixes a record, never trusts the model’s own confidence, and receives the consequence from its caller.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">W2. In Part A, what did the implementation write itself?</p>
+    <ol>
+      <li>Every field type on Relationship</li>
+      <li>The extra-forbid config lines</li>
+      <li>The min_length limits on text</li>
+      <li>The two model validator bodies</li>
+    </ol>
+    <p class="explain">Compare <code>git show 453a596:gatekeeper.py</code> with your file: every field, every <code>Field(…)</code> limit and both <code>model_config</code> lines were already in the starter, with the rules written as TODO A1 and A2. The implementation wrote only the two validator functions. That makes Part A the <em>least</em> “yours” part of the code, and the easiest to defend: the design is the professor’s.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What “the contract” means in code</h2>
+  <p><strong>Part A</strong> is the first of the five parts the lab’s <code>README.md</code> splits the work into: A contract, B evidence, C semantic findings, D acceptance policy (<code>decide()</code>), E reflection. Each has its own test class (<code>PartA</code>, <code>PartB</code>…) and a banner comment in <code>gatekeeper.py</code>. The starter’s TODOs are numbered after them: A1 is <code>ExtractedValue</code>’s rule, A2 is <code>Relationship</code>’s.</p>
+
+  <p>In lesson 2 the contract was the step that refuses to build a malformed or inconsistent record. In code it is just two pydantic classes, <code>ExtractedValue</code> and <code>Relationship</code>. Calling <code>Relationship(**data)</code> either returns an object or raises <code>ValidationError</code>. There is no half-built record.<span class="side">This is Alexis King’s “<a href="https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/">Parse, don’t validate</a>”: make illegal states unrepresentable, so every later function can trust what it receives.</span></p>
+
+  <p>Pydantic checks the input in a fixed order. Think of it as four gates:</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Gate</th><th>What it looks at</th><th>Error <code>type</code> you see</th><th>Given or built</th></tr></thead>
+    <tbody>
+      <tr><td><strong>1. Unknown fields</strong></td><td>any key the class doesn’t declare, because of <code>model_config = ConfigDict(extra="forbid")</code></td><td><code>extra_forbidden</code></td><td>given</td></tr>
+      <tr><td><strong>2. Each field alone</strong></td><td>the type (<code>Predicate</code> enum, <code>bool</code>, <code>str | None</code>), presence, and <code>Field(min_length=1)</code></td><td><code>enum</code>, <code>missing</code>, <code>string_too_short</code>, <code>bool_parsing</code></td><td>given</td></tr>
+      <tr><td><strong>3. The rule linking fields</strong></td><td>the whole, already-typed object, in a <code>@model_validator(mode="after")</code></td><td><code>value_error</code></td><td><strong>built</strong></td></tr>
+      <tr><td><strong>4. Done</strong></td><td>nothing left: the object exists</td><td>—</td><td></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Gates 1 and 2 run together and pydantic reports <em>all</em> their errors at once. Gate 3 runs <strong>only if gates 1 and 2 found nothing</strong>. So a record with an empty <code>subject_text</code> <em>and</em> <code>causes</code> + <code>negated=True</code> reports only <code>string_too_short</code>; your <code>_negation</code> rule never gets a say.<span class="side">Confirmed by running your code with pydantic 2.14. The docs say after-validators “run after the whole model has been validated” (<a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#model-validators">Validators › Model validators</a>).</span></p>
+</section>
+
+<section>
+  <h2>The two functions you wrote</h2>
+  <pre><code>class ExtractedValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")           # given
+    value: str | None                                    # given: no default
+    status: ValueStatus                                  # given
+    reason: str | None = None                            # given
+
+    @model_validator(mode="after")                       # built from here down
+    def _value_matches_status(self) -> "ExtractedValue":
+        if self.status == ValueStatus.PRESENT and self.value is None:
+            raise ValueError("status present requires a value")
+        if self.status != ValueStatus.PRESENT and self.value is not None:
+            raise ValueError(f"status {self.status.value} forbids a value")
+        return self
+
+class Relationship(BaseModel):
+    ...                                                  # given: all fields
+    @model_validator(mode="after")                       # built
+    def _negation(self) -> "Relationship":
+        if self.negated and self.predicate in ASSERTED:
+            raise ValueError(f"negated=True contradicts asserted predicate {self.predicate.value}")
+        return self</code></pre>
+  <span class="src">gatekeeper.py, commit fadcd29, lines 33–74</span>
+
+  <h3>Three choices to defend</h3>
+  <p><strong><code>mode="after"</code>, not <code>"before"</code>.</strong> An after-validator receives <code>self</code>: an object whose fields have already passed gate 2. So <code>self.status</code> is a real <code>ValueStatus</code> even if the input was the string <code>"present"</code>, and <code>self.negated</code> is a real <code>bool</code> even if the input was <code>"yes"</code>. A before-validator gets the raw input dict and would have to handle strings, missing keys and junk itself.</p>
+
+  <p><strong><code>raise ValueError</code>, not <code>assert</code>.</strong> Pydantic turns a <code>ValueError</code> raised in a validator into a <code>ValidationError</code> with type <code>value_error</code>, like any other contract failure. An <code>assert</code> would work in tests, but Python deletes asserts when run with <code>python -O</code>, and the contract would silently vanish.<span class="side"><a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#raising-validation-errors">Validators › Raising validation errors</a> warns against <code>assert</code> for exactly this reason. An after-validator must also <code>return self</code>.</span></p>
+
+  <p><strong>Unknown is not null.</strong> <code>value: str | None</code> has no default, so leaving <code>value</code> out is an error (<code>missing</code>). You must write <code>value=None</code> <em>and</em> a <code>status</code> that says <em>why</em> it is empty: <code>not_found_in_source</code>, <code>ambiguous</code>, <code>withheld</code>… A bare <code>None</code> can’t tell “the paper doesn’t say” from “the extractor crashed”. That design is given; your validator enforces it in both directions, which is what <code>test_every_non_present_status_forbids_value</code> pins.</p>
+
+  <h3>Two limits to name before you’re asked</h3>
+  <ul>
+    <li><strong><code>value=""</code> passes as <code>present</code>.</strong> The check is <code>is None</code>, and an empty string isn’t <code>None</code>. No test covers it. (Confirmed by running.)</li>
+    <li><strong>The gates guard construction only.</strong> <code>Relationship</code> isn’t frozen and has no <code>validate_assignment</code>, so <code>rel.negated = True</code> on a <code>causes</code> record succeeds silently. Rebuilding it with <code>Relationship.model_validate(rel.model_dump())</code> raises. (Confirmed by running.)</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Practice: which gate stops it?</h2>
+  <p>For each input, pick the first gate that rejects it, or say it gets built. Every answer was confirmed by running your code.</p>
+  <p class="quiz-score"></p>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">1. <code>ExtractedValue(value="", status="present")</code></p>
+    <ol>
+      <li>Accepted: the record exists</li>
+      <li>Rejected: an unknown field</li>
+      <li>Rejected: a rule fails</li>
+      <li>Rejected: a field fails</li>
+    </ol>
+    <p class="explain"><code>""</code> is a valid <code>str</code>, and your rule only asks <code>self.value is None</code>. This is limit 1 above: a present-but-empty value gets through.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">2. <code>ExtractedValue(status="withheld")</code></p>
+    <ol>
+      <li>Rejected: a rule fails</li>
+      <li>Accepted: the record exists</li>
+      <li>Rejected: a field fails</li>
+      <li>Rejected: an unknown field</li>
+    </ol>
+    <p class="explain"><code>value</code> has no default, so it is required: <code>missing · Field required</code>. “Unknown is not null”: you must write <code>value=None</code> explicitly.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">3. <code>ExtractedValue(value="Germany", status="not_found_in_source")</code></p>
+    <ol>
+      <li>Rejected: a field fails</li>
+      <li>Rejected: a rule fails</li>
+      <li>Rejected: an unknown field</li>
+      <li>Accepted: the record exists</li>
+    </ol>
+    <p class="explain">Both fields are fine alone. Your second <code>if</code> raises: <code>value_error · Value error, status not_found_in_source forbids a value</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">4. The Gene X record, but with <code>predicate=causes</code>, <code>negated=True</code> and <code>subject_text=""</code>.</p>
+    <ol>
+      <li>Rejected: a rule fails</li>
+      <li>Accepted: the record exists</li>
+      <li>Rejected: an unknown field</li>
+      <li>Rejected: a field fails</li>
+    </ol>
+    <p class="explain">It breaks the negation rule too, but gate 3 only runs once every field is valid. The only error reported is <code>string_too_short</code> on <code>subject_text</code>.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">5. <code>ExtractedValue(value=None, status="present", confidence=0.9)</code></p>
+    <ol>
+      <li>Rejected: a field fails</li>
+      <li>Rejected: a rule fails</li>
+      <li>Rejected: an unknown field</li>
+      <li>Accepted: the record exists</li>
+    </ol>
+    <p class="explain"><code>confidence</code> isn’t declared, so <code>extra="forbid"</code> gives <code>extra_forbidden</code>. The present-without-value rule would also fail, but it never runs.</p>
+  </div>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">6. A <code>Relationship</code> with <code>predicate=inhibits</code> and <code>negated="yes"</code>.</p>
+    <ol>
+      <li>Rejected: a rule fails</li>
+      <li>Rejected: a field fails</li>
+      <li>Accepted: the record exists</li>
+      <li>Rejected: an unknown field</li>
+    </ol>
+    <p class="explain">Pydantic’s lax mode turns <code>"yes"</code> into <code>True</code>, so gate 2 passes. Then <code>_negation</code> sees <code>True</code> + <code>inhibits</code> and raises. Lesson 2’s surprise, now with its mechanism.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">7. Why do the validators <code>raise ValueError</code> instead of using <code>assert</code>?</p>
+    <ol>
+      <li>assert cannot carry an error message</li>
+      <li>ValueError runs faster than an assert</li>
+      <li>assert is removed under python -O</li>
+      <li>pydantic forbids assert inside any validator</li>
+    </ol>
+    <p class="explain">Optimised mode strips every <code>assert</code>, so the contract would silently stop checking. <code>assert</code> can carry a message, and pydantic does accept it, but its docs advise against it.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">8. <code>rel</code> was built with <code>causes</code>, <code>negated=False</code>. Then a later step runs <code>rel.negated = True</code>. What happens?</p>
+    <ol>
+      <li>ValidationError is raised at the assignment</li>
+      <li>The assignment succeeds with no error</li>
+      <li>Python raises AttributeError: model is frozen</li>
+      <li>The predicate silently changes to unrelated_to</li>
+    </ol>
+    <p class="explain">Validators run when the object is built, not when it changes. Neither <code>frozen=True</code> nor <code>validate_assignment=True</code> is set, so the record now breaks the rule and nothing notices. Limit 2.</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">9. What does <code>mode="after"</code> give your validator?</p>
+    <ol>
+      <li>It runs even when fields fail</li>
+      <li>It sees raw input before parsing</li>
+      <li>It runs again on every assignment</li>
+      <li>It sees typed fields, already checked</li>
+    </ol>
+    <p class="explain"><code>self.status</code> is already a <code>ValueStatus</code> and <code>self.negated</code> a <code>bool</code>, so a plain comparison is enough. Raw input is what <code>mode="before"</code> sees, and question 4 showed it doesn’t run when fields fail.</p>
+  </div>
+
+  <h3>Say it out loud</h3>
+  <p>As if the professor asked “walk me through Part A”: three sentences, without looking. Then check.</p>
+  <details>
+    <summary>Checklist: three points</summary>
+    <ol>
+      <li>Pydantic rejects unknown fields and bad single fields first, then runs the model validators only if those passed; any failure raises <code>ValidationError</code> and no object exists.</li>
+      <li>The professor gave the fields and limits; I wrote two <code>mode="after"</code> validators, after so they see typed fields, raising <code>ValueError</code> because <code>assert</code> disappears under <code>-O</code>.</li>
+      <li>Two limits: an empty string counts as a present value, and the rules only run at construction, so a later assignment can break them.</li>
+    </ol>
+  </details>
+
+  <div class="callout">
+    <p><strong>Report back.</strong> Your score, and how many of the three points you hit. Retake <a href="0001-the-map-gene-x-through-the-gatekeeper.html">lesson 1’s quiz</a> too if you haven’t yet.</p>
+    <p><strong>Ask me anything that’s still unclear.</strong> Want to see an error for yourself? Ask, and I’ll give you a one-liner to run.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Read next</h2>
+  <p><strong>Primary source: pydantic’s <a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#model-validators">Validators › Model validators</a></strong>, then <a href="https://pydantic.dev/docs/validation/latest/concepts/validators/#raising-validation-errors">Raising validation errors</a>. Five minutes; it is the documentation for the only code you wrote in Part A. The <a href="../reference/contract.html">contract sheet</a> has this lesson on one page.</p>
+</section>
+
+<nav class="nav">
+  <a href="0002-foundations-the-job-three-kinds-of-wrong.html">← Lesson 2: Foundations</a>
+  <a href="0004-two-passes.html">Lesson 4: Two passes →</a>
+</nav>
+
+</article>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 1 · The Map</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Lesson 1</p>
+  <h1>The map: how Gene X crosses your gatekeeper</h1>
+  <p class="subtitle">In a defense, the first question is almost always “walk me through it.” This lesson gives you that walk-through: four stages, one example and two separations. About ten minutes.</p>
+  <p><strong>Feels dense?</strong> Do <a href="0002-foundations-the-job-three-kinds-of-wrong.html">lesson 2 (foundations)</a> first. It explains what the gatekeeper is for, what “contract” means, and which parts the professor gave you.</p>
+</header>
+
+<section>
+  <h2>Valid is not true</h2>
+
+  <p>The source sentence:</p>
+  <blockquote><p>Gene X did not significantly increase the risk of Disease Y.</p></blockquote>
+
+  <p>The model returned <code>predicate=causes</code>, <code>negated=False</code> and <code>uncertainty=low</code>. The JSON parses, every field is present and the predicate is in the vocabulary. It is still false.<span class="side">OWASP calls this <a href="https://genai.owasp.org/llmrisk/llm092025-misinformation/">LLM09 Misinformation</a>: “false or misleading information that appears credible.”</span></p>
+
+  <p>Your <code>Relationship</code> contract <em>accepts</em> this candidate, and that is intended. One public test exists only to prove it:</p>
+
+<pre><code>def test_two_consistent_mistakes_pass_the_contract(self):
+    # The point of the lab: this wrong candidate is structurally VALID.
+    rel = make_rel(predicate=Predicate.CAUSES, negated=False)</code></pre>
+  <span class="src">tests/test_gatekeeper.py</span>
+
+  <p>The model made two mistakes: <code>causes</code> (the paper denies an effect) and <code>negated=False</code> (the sentence says “did not”). The two agree with each other: together they say “Gene X causes Disease Y”, a coherent claim that just isn’t what the paper says. A contract can catch a candidate whose fields break a rule that links them, such as <code>negated=True</code> with <code>causes</code>. It can never catch one that contradicts <em>the source</em>, because it never reads the source. A later stage has to do that. (<a href="0002-foundations-the-job-three-kinds-of-wrong.html">Lesson 2</a> takes this apart slowly.)</p>
+</section>
+
+<section>
+  <h2>Four stages</h2>
+
+  <div class="pipeline wide">Contract → Checks → Report → Policy</div>
+
+  <ol>
+    <li><strong>Contract</strong> (<code>gatekeeper.py:54</code>). A pydantic model. Malformed or inconsistent input raises <code>ValidationError</code> while the object is being built, so a bad candidate never exists as a <code>Relationship</code>. Lesson 2 opens it up.</li>
+    <li><strong>Checks</strong> (<code>gatekeeper.py:96–255</code>). Plain functions that take the candidate and return one <code>Finding</code>: a <code>check_name</code>, a status (<code>PASSED</code>, <code>WARNING</code> or <code>FAILED</code>) and an <code>issue_code</code> when something looks wrong. They describe what they saw. They don’t judge.</li>
+    <li><strong>Report</strong> (<code>models.py:80</code>). Just a list of findings, with one helper, <code>has(code)</code>.</li>
+    <li><strong>Policy</strong> (<code>gatekeeper.py:186</code>). <code>decide(rel, report, consequence)</code> walks five rules in order. The first rule that matches returns a <code>Decision</code>: a disposition plus reason codes. It is the <em>only</em> function that produces a disposition.</li>
+  </ol>
+
+  <p>The five rules, in the order <code>decide()</code> tries them:<span class="side"><code>decide()</code> first turns consequence into a required assurance (LOW→BASIC, MODERATE→STANDARD, HIGH→STRONG, CRITICAL→HUMAN_CONFIRMED) and branches on that. This lesson states the rules in consequence terms, which says the same thing.</span></p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>#</th><th>If…</th><th>then</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>report has <code>INVALID_EVIDENCE_SPAN</code></td><td><span class="d d-q">QUARANTINE</span></td></tr>
+      <tr><td>2</td><td><code>subject_id</code> or <code>object_id</code> is missing, or the entity is ambiguous</td><td><span class="d d-hr">HUMAN_REVIEW</span> at HIGH/CRITICAL, else <span class="d d-p">PROVISIONAL</span></td></tr>
+      <tr><td>3</td><td>report has a semantic mismatch (<code>NEGATION_CUE_MISMATCH</code>, <code>EVIDENCE_CONTRADICTS_CLAIM</code>, <code>ASSOCIATION_AS_CAUSATION</code>)</td><td><span class="d d-p">PROVISIONAL</span> at LOW, else <span class="d d-hr">HUMAN_REVIEW</span></td></tr>
+      <tr><td>4</td><td>consequence CRITICAL and no human review done yet</td><td><span class="d d-hr">HUMAN_REVIEW</span></td></tr>
+      <tr><td>5</td><td>otherwise</td><td><span class="d d-a">AUTHORITATIVE</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>You don’t have to memorise this table today; it’s on the <a href="../reference/gatekeeper-map.html">reference sheet</a>. Hold on to its shape: the rules are ordered, the first match wins, and the consequence picks the branch.<span class="side">A professor may ask why <code>REJECT</code> exists but your <code>decide()</code> never returns it. In your code, a candidate too broken to build is refused earlier, by the contract’s <code>ValidationError</code>.</span></p>
+</section>
+
+<section>
+  <h2>Trace Gene X</h2>
+
+  <p>This is the real output from running your code on the Gene X candidate. The quote is the whole sentence, the ids <code>GENE:1</code> and <code>DIS:2</code> are set, and the span is valid.</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Check</th><th>Status</th><th>Issue code</th></tr></thead>
+    <tbody>
+      <tr><td><code>source-span</code></td><td>PASSED</td><td>—</td></tr>
+      <tr><td><code>negation-cue</code></td><td>WARNING</td><td><code>NEGATION_CUE_MISMATCH</code> (found “did not”)</td></tr>
+      <tr><td><code>candidate-uncertainty</code></td><td>PASSED</td><td>— (the model said <code>low</code>)</td></tr>
+      <tr><td><code>causal-claim</code></td><td>PASSED</td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Rules 1 and 2 don’t match. Rule 3 does, so <code>decide()</code> returns <span class="d d-p">PROVISIONAL</span> at LOW consequence and <span class="d d-hr">HUMAN_REVIEW</span> at MODERATE, HIGH and CRITICAL.</p>
+
+  <p>Now remove the checks. With an empty report, the same Gene X candidate comes out <span class="d d-a">AUTHORITATIVE</span> at LOW, MODERATE and HIGH. The contract let it through, and one regex is the only thing between a false fact and the database.</p>
+</section>
+
+<section>
+  <h2>Two separations a professor will probe</h2>
+
+  <h3>Checks describe; <code>decide()</code> decides</h3>
+  <p>This is design rule 1 in the README: validators return findings, and only <code>decide()</code> returns a disposition. Gene X shows why. The <em>same</em> <code>NEGATION_CUE_MISMATCH</code> means PROVISIONAL at LOW and HUMAN_REVIEW at HIGH. A check that returned a disposition would need to know the consequence, so every check would carry its own copy of the policy. With the split, the policy lives in one function, and you change it in one place.</p>
+
+  <h3>Consequence, not confidence</h3>
+  <p>This is design rule 3. The model said <code>uncertainty=low</code> about Gene X, and it was wrong. Its confidence is a claim from the same untrusted source.<span class="side">OWASP <a href="https://genai.owasp.org/llmrisk/llm052025-improper-output-handling/">LLM05</a>: “Treat the model as any other user, adopting a zero-trust approach.”</span> So <code>uncertainty_finding</code> <em>records</em> it (a warning when HIGH or UNKNOWN), but none of the five rules reads it, and <code>test_model_confidence_is_not_authority</code> pins exactly that. What does change the outcome is the consequence: how bad it would be if this record were wrong.</p>
+</section>
+
+<section>
+  <h2>Practice</h2>
+
+  <p>Answer from memory: scrolling up first turns retrieval into reading. Your first click counts.</p>
+
+  <p class="quiz-score"></p>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">1. Gene X arrives with <code>predicate=causes</code> and <code>negated=False</code>. Why does the <code>Relationship</code> contract accept it?</p>
+    <ol>
+      <li>Its validator rejects only negated asserted predicates.</li>
+      <li>Pydantic skips validators when uncertainty is low.</li>
+      <li>The evidence span is checked after storage.</li>
+      <li>Extra fields are allowed on this model.</li>
+    </ol>
+    <p class="explain"><code>_negation</code> (<code>gatekeeper.py:71</code>) raises only when <code>negated</code> is True <em>and</em> the predicate is in <code>ASSERTED</code>. False plus <code>causes</code> is self-consistent, so the candidate passes. The contract never reads the source text; that is the checks’ job. (D is backwards: the model sets <code>extra="forbid"</code>.)</p>
+  </div>
+
+  <div class="quiz" data-answer="3">
+    <p class="q">2. What does every check function (<code>span_finding</code>, <code>negation_cue_finding</code>, …) return?</p>
+    <ol>
+      <li>A <code>Decision</code></li>
+      <li>A <code>Disposition</code></li>
+      <li>A <code>Report</code></li>
+      <li>A <code>Finding</code></li>
+    </ol>
+    <p class="explain">Design rule 1: validators return findings, and only <code>decide()</code> returns a disposition. A check doesn’t know the consequence, so it can’t know what should happen to the record.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">3. Gene X’s report holds one WARNING, <code>NEGATION_CUE_MISMATCH</code>. The consequence is HIGH. What does <code>decide()</code> return?</p>
+    <ol>
+      <li><span class="d d-p">PROVISIONAL</span></li>
+      <li><span class="d d-q">QUARANTINE</span></li>
+      <li><span class="d d-hr">HUMAN_REVIEW</span></li>
+      <li><span class="d d-a">AUTHORITATIVE</span></li>
+    </ol>
+    <p class="explain">Rule 3: a semantic mismatch goes to HUMAN_REVIEW unless the consequence is LOW. Rules 1 and 2 didn’t match: the span is valid and both ids are set.</p>
+  </div>
+
+  <div class="quiz" data-answer="1">
+    <p class="q">4. Same report, consequence LOW. What does <code>decide()</code> return?</p>
+    <ol>
+      <li><span class="d d-a">AUTHORITATIVE</span></li>
+      <li><span class="d d-p">PROVISIONAL</span></li>
+      <li><span class="d d-hr">HUMAN_REVIEW</span></li>
+      <li><span class="d d-q">QUARANTINE</span></li>
+    </ol>
+    <p class="explain">Rule 3’s other branch. At LOW consequence the record is kept, but marked PROVISIONAL. The finding is the same as in question 3 and the disposition is different: the consequence chose it.</p>
+  </div>
+
+  <div class="quiz" data-answer="2">
+    <p class="q">5. Same report, consequence LOW, but this time the model said <code>uncertainty=high</code>. Does the disposition change?</p>
+    <ol>
+      <li>Yes, it moves up to human review.</li>
+      <li>Yes, it gets quarantined as unreliable output.</li>
+      <li>No, no rule acts on that signal.</li>
+      <li>No, uncertainty only matters for critical records.</li>
+    </ol>
+    <p class="explain"><code>uncertainty_finding</code> adds a <code>HIGH_CANDIDATE_UNCERTAINTY</code> warning, and <code>decide()</code> copies it into <code>reason_codes</code>, but none of the five rules reads it. The record stays PROVISIONAL. <code>test_model_confidence_is_not_authority</code> pins this (design rule 3).</p>
+  </div>
+
+  <div class="quiz" data-answer="0">
+    <p class="q">6. Delete <code>negation_cue_finding</code> from the pipeline and rerun Gene X at LOW consequence. What does it become?</p>
+    <ol>
+      <li><span class="d d-a">AUTHORITATIVE</span></li>
+      <li><span class="d d-p">PROVISIONAL</span></li>
+      <li><span class="d d-q">QUARANTINE</span></li>
+      <li><span class="d d-hr">HUMAN_REVIEW</span></li>
+    </ol>
+    <p class="explain">The span is real, the ids are set and no other check fires, so rule 5 applies. A false “Gene X causes Disease Y” enters the database as trusted. Keep this in mind for lesson 4, which shows what that regex misses (“didn’t”, “nonsignificant”).</p>
+  </div>
+
+  <h3>Say it out loud</h3>
+  <p>Look away from the screen and explain, out loud and in under 60 seconds, what the gatekeeper is for, its four stages, and why Gene X does not become authoritative. Then open the checklist and count what you hit.</p>
+
+  <details>
+    <summary>Checklist: five points</summary>
+    <ol>
+      <li>Valid is not true: Gene X passes the contract because its two mistakes agree with each other.</li>
+      <li>The contract rejects malformed or inconsistent candidates at construction (<code>ValidationError</code>).</li>
+      <li>Checks return findings. They never decide, and never rewrite the candidate.</li>
+      <li><code>decide()</code> turns findings plus consequence into a disposition; the rules are ordered and the first match wins.</li>
+      <li>The model’s own confidence is never an input to the decision. The consequence is.</li>
+    </ol>
+  </details>
+
+  <div class="callout">
+    <p><strong>Report back.</strong> Tell me (in Claude Code) your quiz score and how many checklist points you hit. That sets lesson 2.</p>
+    <p><strong>Ask me anything that’s unclear.</strong> I’m your teacher for this. Good questions to try: “Why is <code>decide()</code> a list of <code>if</code>s and not a score?” or “What would happen if a check returned a disposition?”</p>
+  </div>
+</section>
+
+<section>
+  <h2>Read next</h2>
+  <p><strong>Primary source:</strong> <a href="https://genai.owasp.org/llmrisk/llm052025-improper-output-handling/">OWASP LLM05:2025, Improper Output Handling</a> (five minutes). It is the industry statement of the idea your whole lab rests on: model output is untrusted input. Then reread the “Design rules” list in the lab <code>README.md</code>. You can now explain each of the four rules.</p>
+  <p>More sources in <code>learning/RESOURCES.md</code>.</p>
+</section>
+
+<nav class="nav">
+  <a href="../reference/gatekeeper-map.html">Reference: Gatekeeper map →</a>
+  <a href="0002-foundations-the-job-three-kinds-of-wrong.html">Lesson 2: Foundations →</a>
+</nav>
+
+</article>
+<script src="../assets/pipeline.js"></script>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

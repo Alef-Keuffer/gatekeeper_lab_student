@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gatekeeper Map</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<article>
+
+<header>
+  <p class="kicker">Owning the Gatekeeper · Reference</p>
+  <h1>Gatekeeper map</h1>
+  <p class="subtitle">The whole solution on one sheet. Line numbers refer to commit <code>fadcd29</code> (branch <code>worktree-try-1</code>).</p>
+</header>
+
+<section>
+  <div class="pipeline wide">LLM candidate → Contract → Checks → Report → Policy → database</div>
+
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Stage</th><th>Code</th><th>Returns</th><th>Never</th></tr></thead>
+    <tbody>
+      <tr><td>Contract</td><td><code>ExtractedValue</code> :33, <code>Relationship</code> :54</td><td>the object, or raises <code>ValidationError</code></td><td>reads the source text</td></tr>
+      <tr><td>Checks</td><td><code>span_finding</code> :96, <code>negation_cue_finding</code> :117, <code>uncertainty_finding</code> :130, <code>causal_claim_finding</code> :243</td><td>one <code>Finding</code></td><td>returns a disposition; rewrites the candidate</td></tr>
+      <tr><td>Report</td><td><code>models.Report</code> :80</td><td><code>has(code)</code></td><td>—</td></tr>
+      <tr><td>Policy</td><td><code>required_assurance</code> :181, <code>decide</code> :186</td><td><code>Decision(disposition, reason_codes)</code></td><td>reads <code>rel.uncertainty</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Helpers outside the flow: <code>sha256_text</code> :81 and <code>verify_span</code> :86 (used by <code>span_finding</code>). <code>resolve_entity</code> :142 returns a <code>ResolutionResult</code>, not a <code>Finding</code>.</p>
+</section>
+
+<section>
+  <h2><code>decide()</code>: first match wins</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Rule</th><th>LOW<br><small>BASIC</small></th><th>MODERATE<br><small>STANDARD</small></th><th>HIGH<br><small>STRONG</small></th><th>CRITICAL<br><small>HUMAN_CONFIRMED</small></th><th>Code added</th></tr></thead>
+    <tbody>
+      <tr><td>1 · <code>INVALID_EVIDENCE_SPAN</code></td><td><span class="d d-q">QUARANTINE</span></td><td><span class="d d-q">QUARANTINE</span></td><td><span class="d d-q">QUARANTINE</span></td><td><span class="d d-q">QUARANTINE</span></td><td>—</td></tr>
+      <tr><td>2 · id missing or <code>AMBIGUOUS_ENTITY_RESOLUTION</code></td><td><span class="d d-p">PROVISIONAL</span></td><td><span class="d d-p">PROVISIONAL</span></td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td><code>UNRESOLVED_ENTITY</code> / <code>ENTITY_RESOLUTION_REQUIRES_REVIEW</code></td></tr>
+      <tr><td>3 · semantic mismatch</td><td><span class="d d-p">PROVISIONAL</span></td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td>—</td></tr>
+      <tr><td>4 · CRITICAL, review not done</td><td>·</td><td>·</td><td>·</td><td><span class="d d-hr">HUMAN_REVIEW</span></td><td><code>HUMAN_CONFIRMATION_REQUIRED</code></td></tr>
+      <tr><td>5 · otherwise</td><td><span class="d d-a">AUTHORITATIVE</span></td><td><span class="d d-a">AUTHORITATIVE</span></td><td><span class="d d-a">AUTHORITATIVE</span></td><td><span class="d d-a">AUTHORITATIVE</span><br><small>after review</small></td><td>—</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><code>reason_codes</code> = every issue code in the report, in order, plus the code in the last column. <code>REJECT</code> is never returned: unbuildable candidates fail earlier, at the contract.</p>
+</section>
+
+<section>
+  <h2>Issue codes</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Code</th><th>Status</th><th>Emitted by</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td><code>INVALID_EVIDENCE_SPAN</code></td><td>FAILED</td><td><code>span_finding</code></td><td>1</td></tr>
+      <tr><td><code>AMBIGUOUS_ENTITY_RESOLUTION</code></td><td>—</td><td>no check in this code</td><td>2</td></tr>
+      <tr><td><code>NEGATION_CUE_MISMATCH</code></td><td>WARNING</td><td><code>negation_cue_finding</code></td><td>3</td></tr>
+      <tr><td><code>EVIDENCE_CONTRADICTS_CLAIM</code></td><td>—</td><td>no check in this code (tests inject it)</td><td>3</td></tr>
+      <tr><td><code>ASSOCIATION_AS_CAUSATION</code></td><td>WARNING</td><td><code>causal_claim_finding</code> (Part E)</td><td>3</td></tr>
+      <tr><td><code>HIGH_CANDIDATE_UNCERTAINTY</code></td><td>WARNING</td><td><code>uncertainty_finding</code></td><td>none, by design</td></tr>
+      <tr><td>any other code</td><td>any</td><td>—</td><td>none: falls through to rule 5</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>The four design rules (README) and where they live</h2>
+  <div class="table-wrap wide">
+  <table>
+    <thead><tr><th>Rule</th><th>In the code</th><th>Pinned by</th></tr></thead>
+    <tbody>
+      <tr><td>1. Validators return findings; only <code>decide()</code> returns a disposition.</td><td>every check returns <code>Finding</code></td><td>Part C/D tests</td></tr>
+      <tr><td>2. A validator never rewrites the candidate.</td><td><code>uncertainty_finding</code> only reads</td><td><code>test_uncertainty_does_not_mutate</code></td></tr>
+      <tr><td>3. Model confidence must not change the disposition; consequence does.</td><td><code>decide()</code> never reads <code>rel.uncertainty</code></td><td><code>test_model_confidence_is_not_authority</code></td></tr>
+      <tr><td>4. <code>NO_MATCH</code> ≠ <code>NOT_FOUND_IN_SOURCE</code>.</td><td>separate enums: <code>ResolutionStatus</code> vs <code>ValueStatus</code></td><td><code>test_resolve_no_match</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <h2>Gene X, traced</h2>
+  <p>“Gene X did not significantly increase the risk of Disease Y.” → <code>causes</code>, <code>negated=False</code>, <code>uncertainty=low</code>.</p>
+  <p>Contract: passes. Checks: span PASSED · negation-cue WARNING <code>NEGATION_CUE_MISMATCH</code> (“did not”) · uncertainty PASSED · causal-claim PASSED.</p>
+  <p>Rule 3 → <span class="d d-p">PROVISIONAL</span> at LOW, <span class="d d-hr">HUMAN_REVIEW</span> otherwise. Without the checks it would be <span class="d d-a">AUTHORITATIVE</span> at LOW, MODERATE and HIGH.</p>
+</section>
+
+<nav class="nav">
+  <a href="../lessons/0001-the-map-gene-x-through-the-gatekeeper.html">← Lesson 1: The map</a>
+</nav>
+
+</article>
+<script src="../assets/pipeline.js"></script>
+</body>
+</html>
