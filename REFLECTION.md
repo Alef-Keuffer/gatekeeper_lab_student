@@ -1,3 +1,25 @@
+# My overall reflection
+
+I had AI create custom sections for me to understand the project which I felt needed more context to understand the code. These are the Claude lessons in [`learning/`](learning/) (see "Use of AI assistants" below). 
+
+I also have some questions that I got:
+
+1. How is the consequence (LOW/MODERATE/HIGH/CRITICAL) decided? The answer you got was only that the caller passes it to decide(). Nothing in the lab says who chooses it or on what basis.
+2. Who adds entries to the entity registry? 
+3. Who fills subject_id / object_id on a candidate?
+4. What is "Engineering Trust into LLM Pipelines", Chapter 2? What is that book? I googled but didn't find
+
+I asked AI to remind me of the questions I asked when trying to understand the project
+
+> What does negated=True mean? Is it a flag saying "the source sentence was negative", or a NOT applied to the predicate ("does not cause")? The lessons assumed it's a flag on the sentence. That was inferred from rule A2 and test_negated_unrelated_or_uncertain_ok; nothing in the lab confirms it. You raised this yourself: "Wouldn't causes + negated=True just mean it does not cause?"
+
+Gaps I got with AI:
+
+> Gaps found while reading the code, not questions you asked (possible reflection material)
+> - decide() fails open: a FAILED finding with a code that no rule names ends up AUTHORITATIVE.
+> - No check ever emits AMBIGUOUS_ENTITY_RESOLUTION or EVIDENCE_CONTRADICTS_CLAIM, even though rules 2 and 3 of decide() read them.
+> - The REJECT disposition is never returned.
+
 # Reflection: The Gatekeeper
 
 All three candidates below pass the `Relationship` contract: the predicate is in the vocabulary,
@@ -61,6 +83,8 @@ inhibits Protein P.
 - `decide()` fails open. A FAILED finding whose code is not named in a rule (for example a future
   `ENTITY_ID_MISMATCH`) is copied into `reason_codes` and the record still becomes AUTHORITATIVE.
   Every new check therefore has to be wired into a rule before it has any effect.
+- The Part A contract has two limits of its own: an empty string counts as a present value, and the
+  rules are checked only when a record is built. See [`LIMITATIONS.md`](LIMITATIONS.md).
 
 ## 2. New check: `causal_claim_finding`
 
@@ -118,6 +142,13 @@ record (reviewer, timestamp, reviewed version) that the write path checks before
 All of `gatekeeper.py` (Parts A to E), `tests/test_extra.py` and the first draft of this file were
 generated with Claude Code (Claude Opus 5.5). The output was checked against the public tests and
 a separate probe script that ran extra inputs and the three candidates above.
+
+- **Learning:** to understand the generated solution, I also used Claude to write a short series of
+  lessons for me, in [`learning/`](learning/). It holds 4 lessons with quizzes (`learning/lessons/`),
+  3 reference pages (the contract, a map of the gatekeeper, and what the lab gave vs. what was built,
+  in `learning/reference/`), and learning records that track what I understood and what I didn't
+  after each lesson (`learning/learning-records/`). The questions at the top of this file came out
+  of those lessons.
 
 - **Changed:** the spec for `verify_span` lists two conditions, a matching checksum and a slice equal
   to the quote. Implemented literally, those conditions accept a span whose `end_offset` runs past
